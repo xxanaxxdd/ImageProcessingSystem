@@ -1,0 +1,114 @@
+services:
+
+  api:
+    build: .
+    container_name: api
+    ports:
+      - "8000:8000"
+    volumes:
+      - shared_uploads:/app/uploads
+      - shared_results:/app/results
+    depends_on:
+      mysql_master:
+        condition: service_healthy
+      redis:
+        condition: service_started
+    environment:
+      - DATABASE_URL=mysql+pymysql://root:root@mysql_master/images_db
+      - CELERY_BROKER_URL=redis://redis:6379/0
+
+  worker1:
+    build: .
+    container_name: worker1
+    command: celery -A worker.celery_worker worker --loglevel=info --pool=threads --concurrency=${WORKER_THREADS:-4} -n worker1@%h
+    volumes:
+      - shared_uploads:/app/uploads
+      - shared_results:/app/results
+    depends_on:
+      mysql_master:
+        condition: service_healthy
+      redis:
+        condition: service_started
+    environment:
+      - DATABASE_URL=mysql+pymysql://root:root@mysql_master/images_db
+      - CELERY_BROKER_URL=redis://redis:6379/0
+      - WORKER_THREADS=${WORKER_THREADS:-4}
+      - NODO_NOMBRE=worker1
+
+  worker2:
+    build: .
+    container_name: worker2
+    command: celery -A worker.celery_worker worker --loglevel=info --pool=threads --concurrency=${WORKER_THREADS:-4} -n worker2@%h
+    volumes:
+      - shared_uploads:/app/uploads
+      - shared_results:/app/results
+    depends_on:
+      mysql_master:
+        condition: service_healthy
+      redis:
+        condition: service_started
+    environment:
+      - DATABASE_URL=mysql+pymysql://root:root@mysql_master/images_db
+      - CELERY_BROKER_URL=redis://redis:6379/0
+      - WORKER_THREADS=${WORKER_THREADS:-4}
+      - NODO_NOMBRE=worker2
+
+  redis:
+    image: redis:7
+    container_name: redis
+    ports:
+      - "6379:6379"
+
+  mysql_master:
+    image: mysql:8
+    container_name: mysql_master
+    restart: always
+    command: >
+      --server-id=1
+      --log-bin=mysql-bin
+      --binlog-format=ROW
+      --binlog-do-db=images_db
+    environment:
+      MYSQL_ROOT_PASSWORD: root
+      MYSQL_DATABASE: images_db
+    ports:
+      - "3307:3306"
+    volumes:
+      - mysql_master_data:/var/lib/mysql
+      - ./mysql/init-master.sql:/docker-entrypoint-initdb.d/init-master.sql:ro
+    healthcheck:
+      test: ["CMD", "mysqladmin", "ping", "-h", "localhost", "-uroot", "-proot"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+
+  mysql_replica:
+    image: mysql:8
+    container_name: mysql_replica
+    restart: always
+    command: >
+      --server-id=2
+      --relay-log=relay-bin
+      --read-only=1
+    environment:
+      MYSQL_ROOT_PASSWORD: root
+      MYSQL_DATABASE: images_db
+    ports:
+      - "3308:3306"
+    volumes:
+      - mysql_replica_data:/var/lib/mysql
+      - ./mysql/init-replica.sh:/docker-entrypoint-initdb.d/init-replica.sh
+    depends_on:
+      mysql_master:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "mysqladmin", "ping", "-h", "localhost", "-uroot", "-proot"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+
+volumes:
+  shared_uploads:
+  shared_results:
+  mysql_master_data:
+  mysql_replica_data:

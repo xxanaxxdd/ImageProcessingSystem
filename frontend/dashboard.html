@@ -1,0 +1,829 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+<meta charset="UTF-8">
+<link rel="stylesheet" href="css/styles.css">
+<title>Panel principal</title>
+
+
+</head>
+<body>
+
+<div class="header">
+    <span>Sistema de Procesamiento de Imágenes</span>
+    <button class="btn-danger" onclick="logout()" style="padding:6px 14px; font-size:13px;">
+        Cerrar sesión
+    </button>
+</div>
+
+<div class="container">
+
+<!-- ===================== NUEVA SOLICITUD ===================== -->
+<div class="card">
+    <h3>Nueva solicitud</h3>
+
+    <label>Imagen</label>
+    <input type="file" id="fileInput" accept="image/*" multiple>
+
+    <label>Transformaciones</label>
+    <div class="checkboxes" id="checkboxes">Cargando...</div>
+
+    <div id="params-container" style="margin-top:12px;"></div>
+
+    <div class="btn-row">
+        <button id="btnProcesar" onclick="procesarImagen()">Procesar imagen</button>
+    </div>
+
+    <p id="msgSolicitud"></p>
+    <pre id="resSolicitud" style="display:none"></pre>
+</div>
+
+<!-- ===================== CONSULTAR SOLICITUD ===================== -->
+<div class="card">
+    <h3>Consultar solicitud</h3>
+
+    <label>ID de solicitud</label>
+    <input type="number" id="inputId" placeholder="Ej: 1" min="1">
+
+    <div class="btn-row">
+        <button class="btn-secondary" onclick="verEstado()">Ver estado</button>
+        <button class="btn-secondary" onclick="verResultados()">Ver resultados</button>
+        <button class="btn-secondary" onclick="verImagenes()">Ver imágenes</button>
+        <button class="btn-success"   onclick="descargarResultados()">Descargar ZIP</button>
+        <button class="btn-secondary" onclick="verLogsSolicitud()">Ver log</button>
+    </div>
+
+    <p id="msgConsulta"></p>
+    <pre id="resConsulta" style="display:none"></pre>
+    <div id="tablaImagenes"></div>
+</div>
+
+<!-- ===================== HISTORIAL ===================== -->
+<div class="card">
+    <h3>Historial de solicitudes</h3>
+
+    <div class="btn-row">
+        <button class="btn-secondary" onclick="cargarHistorial()">Actualizar historial</button>
+    </div>
+
+    <div id="tablaHistorial"></div>
+</div>
+
+<!-- ===================== MÉTRICAS ===================== -->
+<div class="card">
+    <h3>Métricas del sistema</h3>
+    <div class="btn-row">
+        <button class="btn-secondary" onclick="cargarMetricas()">Actualizar métricas</button>
+    </div>
+    <div id="panelMetricas"></div>
+</div>
+
+<!-- ===================== NODOS ACTIVOS ===================== -->
+<div class="card">
+    <h3>Nodos activos</h3>
+    <div class="btn-row">
+        <button class="btn-secondary" onclick="cargarNodos()">Actualizar nodos</button>
+    </div>
+    <div id="tablaНодов"></div>
+</div>
+
+<!-- ===================== LOGS DEL SISTEMA ===================== -->
+<div class="card">
+    <h3>Logs del sistema</h3>
+    <div class="btn-row">
+        <button class="btn-secondary" onclick="cargarLogs()">Todos</button>
+        <button class="btn-danger"    onclick="cargarLogs('ERROR')">Solo errores</button>
+    </div>
+    <div id="tablaLogs"></div>
+</div>
+
+</div>
+
+<script>
+
+const API = "http://192.168.32.129:8000";
+
+/* ─── utilidades ─── */
+
+function token() {
+    return localStorage.getItem("token");
+}
+
+function authHeader() {
+    return { Authorization: "Bearer " + token() };
+}
+
+function manejarNoAutorizado(status) {
+    if (status === 401) {
+        localStorage.removeItem("token");
+        window.location.href = "login.html";
+        return true;
+    }
+    return false;
+}
+
+function setMsg(elId, texto, tipo) {
+    const el = document.getElementById(elId);
+    el.className = "msg-" + tipo;
+    el.innerText = texto;
+}
+
+function setRes(elId, data) {
+    const el = document.getElementById(elId);
+    el.style.display = "block";
+    el.innerText = JSON.stringify(data, null, 2);
+}
+
+function badge(estado) {
+    return `<span class="badge badge-${estado}">${estado}</span>`;
+}
+
+function fechaBogota(fechaStr) {
+    if (!fechaStr) return "—";
+    const s = fechaStr.toString().trim();
+    const utc = new Date((s.includes("T") ? s : s.replace(" ", "T")) + (s.endsWith("Z") ? "" : "Z"));
+    return utc.toLocaleString("es-CO", {
+        timeZone: "America/Bogota",
+        year: "numeric", month: "2-digit", day: "2-digit",
+        hour: "2-digit", minute: "2-digit", second: "2-digit",
+        hour12: false
+    });
+}
+
+function badgeNivel(nivel) {
+    const color = nivel === "ERROR" ? "#fadbd8;color:#922b21"
+                : nivel === "WARNING" ? "#fef9e7;color:#9a7d0a"
+                : "#d5f5e3;color:#1e8449";
+    return `<span style="background:${color};padding:2px 8px;border-radius:10px;font-size:11px;font-weight:bold;">${nivel}</span>`;
+}
+
+/* ─── init ─── */
+
+function init() {
+    if (!token()) {
+        window.location.href = "login.html";
+        return;
+    }
+    cargarTransformaciones();
+    cargarHistorial();
+    cargarMetricas();
+    cargarNodos();
+    cargarLogs();
+}
+
+function logout() {
+    localStorage.removeItem("token");
+    window.location.href = "login.html";
+}
+
+/* ─── configuración de parámetros por transformación ─── */
+
+const PARAMS_CONFIG = {
+    redimensionar:       [
+        { key: "ancho",     label: "Ancho (px)",        type: "number", default: 800,     step: 1   },
+        { key: "alto",      label: "Alto (px)",         type: "number", default: 600,     step: 1   },
+    ],
+    rotar:               [
+        { key: "angulo",    label: "Ángulo (°)",         type: "number", default: 90,      step: 1   },
+    ],
+    recortar:            [
+        { key: "izquierda", label: "Izquierda (px)",    type: "number", default: 0,       step: 1   },
+        { key: "superior",  label: "Superior (px)",     type: "number", default: 0,       step: 1   },
+        { key: "derecha",   label: "Derecha (px)",      type: "number", default: 200,     step: 1   },
+        { key: "inferior",  label: "Inferior (px)",     type: "number", default: 200,     step: 1   },
+    ],
+    brillo:              [
+        { key: "factor",    label: "Factor (ej: 1.5)",  type: "number", default: 1.5,     step: 0.1 },
+    ],
+    contraste:           [
+        { key: "factor",    label: "Factor (ej: 1.5)",  type: "number", default: 1.5,     step: 0.1 },
+    ],
+    nitidez:             [
+        { key: "factor",    label: "Factor (ej: 2.0)",  type: "number", default: 2.0,     step: 0.1 },
+    ],
+    desenfoque:          [
+        { key: "radio",     label: "Radio (ej: 2.0)",   type: "number", default: 2.0,     step: 0.1 },
+    ],
+    convertir_formato:   [
+        { key: "formato",   label: "Formato",           type: "select",
+          options: ["JPEG", "PNG", "WEBP"],              default: "JPEG"                           },
+    ],
+    marca_agua:          [
+        { key: "texto",     label: "Texto",             type: "text",   default: "Mi marca"       },
+        { key: "posicion",  label: "Posición",          type: "select",
+          options: ["centro", "arriba", "abajo", "izquierda", "derecha"], default: "centro"        },
+    ],
+};
+
+function toggleParams(checkbox) {
+    const nombre = checkbox.dataset.nombre;
+    const id     = checkbox.value;
+    const campos = PARAMS_CONFIG[nombre];
+    const contenedor = document.getElementById("params-container");
+
+    if (!checkbox.checked) {
+        const bloque = document.getElementById("params-" + id);
+        if (bloque) bloque.remove();
+        return;
+    }
+
+    if (!campos) return;
+
+    const bloque = document.createElement("div");
+    bloque.id = "params-" + id;
+    bloque.style.cssText =
+        "background:#f9f0fb;border-left:3px solid #eba7da;" +
+        "padding:12px 16px;margin-bottom:10px;border-radius:0 8px 8px 0;";
+
+    bloque.innerHTML = `
+        <strong style="font-size:13px;color:#7a3d6e;">${nombre}</strong>
+        ${campos.map(campo => {
+            const inputId = `param-${id}-${campo.key}`;
+            if (campo.type === "select") {
+                return `
+                    <div style="margin-top:8px;">
+                        <label for="${inputId}" style="font-size:12px;color:#555;">${campo.label}</label><br>
+                        <select id="${inputId}" data-trans="${id}" data-key="${campo.key}"
+                            style="margin-top:4px;padding:5px 8px;border:1px solid #ccc;
+                                   border-radius:6px;font-size:13px;width:180px;">
+                            ${campo.options.map(o =>
+                                `<option value="${o}" ${o === campo.default ? "selected" : ""}>${o}</option>`
+                            ).join("")}
+                        </select>
+                    </div>`;
+            }
+            return `
+                <div style="margin-top:8px;">
+                    <label for="${inputId}" style="font-size:12px;color:#555;">${campo.label}</label><br>
+                    <input id="${inputId}" type="${campo.type}"
+                        data-trans="${id}" data-key="${campo.key}"
+                        value="${campo.default}" step="${campo.step || 1}"
+                        style="margin-top:4px;padding:5px 8px;border:1px solid #ccc;
+                               border-radius:6px;font-size:13px;width:180px;">
+                </div>`;
+        }).join("")}
+    `;
+
+    contenedor.appendChild(bloque);
+}
+
+/* ─── cargar transformaciones ─── */
+
+async function cargarTransformaciones() {
+    const contenedor = document.getElementById("checkboxes");
+    try {
+        const res = await fetch(API + "/transformaciones");
+        const lista = await res.json();
+        if (!lista.length) {
+            contenedor.innerText = "Sin transformaciones disponibles.";
+            return;
+        }
+        contenedor.innerHTML = lista.map(t =>
+            `<label>
+                <input type="checkbox"
+                    value="${t.id_transformacion}"
+                    data-nombre="${t.nombre}"
+                    onchange="toggleParams(this)">
+                ${t.nombre}
+            </label>`
+        ).join("");
+    } catch (e) {
+        contenedor.innerText = "No se pudieron cargar las transformaciones.";
+    }
+}
+
+/* ─── crear solicitud ─── */
+
+async function procesarImagen() {
+    const btn = document.getElementById("btnProcesar");
+    const msgEl = "msgSolicitud";
+    const resEl = "resSolicitud";
+
+    document.getElementById(resEl).style.display = "none";
+
+    const files = document.getElementById("fileInput").files;
+    if (!files.length) { setMsg(msgEl, "Selecciona al menos una imagen.", "error"); return; }
+
+    const checkboxesMarcados = Array.from(
+        document.querySelectorAll("#checkboxes input:checked")
+    );
+
+    if (!checkboxesMarcados.length) {
+        setMsg(msgEl, "Selecciona al menos una transformación.", "error");
+        return;
+    }
+
+    const seleccionados = checkboxesMarcados.map(cb => {
+        const id = parseInt(cb.value);
+
+        const inputsParams = document.querySelectorAll(
+            `#params-${cb.value} [data-trans="${cb.value}"]`
+        );
+
+        const params = {};
+        let valido = true;
+
+        for (const input of inputsParams) {
+            const key   = input.dataset.key;
+            const valor = input.value.trim();
+
+            if (input.type === "number") {
+                if (valor === "" || isNaN(Number(valor))) {
+                    setMsg(msgEl, `Valor inválido en "${key}" de ${cb.dataset.nombre}.`, "error");
+                    valido = false;
+                    break;
+                }
+                params[key] = Number(valor);
+            } else {
+                params[key] = valor;
+            }
+        }
+
+        if (!valido) return null;
+
+        return Object.keys(params).length > 0
+            ? { id, params }
+            : id;
+    });
+
+    if (seleccionados.includes(null)) return;
+
+    const formData = new FormData();
+    for (const file of files) {
+        formData.append("imagenes", file);
+    }
+    formData.append("transformaciones", JSON.stringify(seleccionados));
+
+    btn.disabled = true;
+    setMsg(msgEl, "Enviando solicitud...", "info");
+
+    try {
+        const res = await fetch(API + "/solicitudes", {
+            method: "POST",
+            headers: authHeader(),
+            body: formData
+        });
+
+        if (manejarNoAutorizado(res.status)) return;
+
+        const data = await res.json();
+
+        if (res.ok) {
+            setMsg(msgEl, `Solicitud creada. ID: ${data.id_solicitud}`, "success");
+            document.getElementById("inputId").value = data.id_solicitud;
+            cargarHistorial();
+        } else {
+            setMsg(msgEl, data.detail || "Error al crear solicitud.", "error");
+        }
+
+        setRes(resEl, data);
+
+    } catch (e) {
+        setMsg(msgEl, "Error de conexión: " + e.message, "error");
+    } finally {
+        btn.disabled = false;
+    }
+}
+
+/* ─── ver estado ─── */
+
+async function verEstado() {
+    const id = document.getElementById("inputId").value;
+    if (!id) { setMsg("msgConsulta", "Ingresa un ID.", "error"); return; }
+
+    document.getElementById("resConsulta").style.display = "none";
+    setMsg("msgConsulta", "Consultando...", "info");
+
+    try {
+        const res = await fetch(API + "/solicitudes/" + id, {
+            headers: authHeader()
+        });
+
+        if (manejarNoAutorizado(res.status)) return;
+
+        const data = await res.json();
+
+        if (res.ok) {
+            setMsg("msgConsulta",
+                `Estado: ${data.estado} | Completadas: ${data.progreso.completadas}/${data.total_imagenes}`,
+                "success"
+            );
+        } else {
+            setMsg("msgConsulta", data.detail || "No encontrada.", "error");
+        }
+
+        setRes("resConsulta", data);
+
+    } catch (e) {
+        setMsg("msgConsulta", "Error de conexión: " + e.message, "error");
+    }
+}
+
+/* ─── ver resultados ─── */
+
+async function verResultados() {
+    const id = document.getElementById("inputId").value;
+    if (!id) { setMsg("msgConsulta", "Ingresa un ID.", "error"); return; }
+
+    document.getElementById("resConsulta").style.display = "none";
+    setMsg("msgConsulta", "Obteniendo resultados...", "info");
+
+    try {
+        const res = await fetch(API + "/solicitudes/" + id + "/resultados", {
+            headers: authHeader()
+        });
+
+        if (manejarNoAutorizado(res.status)) return;
+
+        const data = await res.json();
+
+        if (res.ok) {
+            setMsg("msgConsulta", `${data.archivos.length} archivo(s) disponible(s).`, "success");
+        } else {
+            setMsg("msgConsulta", data.detail || "Sin resultados.", "error");
+        }
+
+        setRes("resConsulta", data);
+
+    } catch (e) {
+        setMsg("msgConsulta", "Error de conexión: " + e.message, "error");
+    }
+}
+
+/* ─── descargar ZIP ─── */
+
+async function descargarResultados() {
+    const id = document.getElementById("inputId").value;
+    if (!id) { setMsg("msgConsulta", "Ingresa un ID.", "error"); return; }
+
+    setMsg("msgConsulta", "Preparando descarga...", "info");
+
+    try {
+        const res = await fetch(API + "/descargar/" + id, {
+            headers: authHeader()
+        });
+
+        if (manejarNoAutorizado(res.status)) return;
+
+        if (!res.ok) {
+            const err = await res.json();
+            setMsg("msgConsulta", err.detail || "No hay resultados para descargar.", "error");
+            return;
+        }
+
+        const blob = await res.blob();
+        const url  = URL.createObjectURL(blob);
+        const a    = document.createElement("a");
+        a.href     = url;
+        a.download = `resultados_${id}.zip`;
+        a.click();
+        URL.revokeObjectURL(url);
+
+        setMsg("msgConsulta", "Descarga iniciada.", "success");
+
+    } catch (e) {
+        setMsg("msgConsulta", "Error de conexión: " + e.message, "error");
+    }
+}
+
+/* ─── historial ─── */
+
+async function cargarHistorial() {
+    const contenedor = document.getElementById("tablaHistorial");
+    contenedor.innerHTML = "<p class='msg-info'>Cargando...</p>";
+
+    try {
+        const res = await fetch(API + "/solicitudes", {
+            headers: authHeader()
+        });
+
+        if (manejarNoAutorizado(res.status)) return;
+
+        const lista = await res.json();
+
+        if (!lista.length) {
+            contenedor.innerHTML = "<p class='msg-info'>No hay solicitudes registradas.</p>";
+            return;
+        }
+
+        const filas = lista.map(s => `
+            <tr>
+                <td>${s.id_solicitud}</td>
+                <td>${badge(s.estado)}</td>
+                <td>${s.total_imagenes}</td>
+                <td>${fechaBogota(s.fecha_solicitud)}</td>
+                <td>
+                    <button class="btn-secondary" style="padding:4px 10px; font-size:12px;"
+                        onclick="seleccionarId(${s.id_solicitud})">
+                        Seleccionar
+                    </button>
+                </td>
+            </tr>
+        `).join("");
+
+        contenedor.innerHTML = `
+            <table>
+                <thead>
+                    <tr>
+                        <th>ID</th>
+                        <th>Estado</th>
+                        <th>Imágenes</th>
+                        <th>Fecha</th>
+                        <th></th>
+                    </tr>
+                </thead>
+                <tbody>${filas}</tbody>
+            </table>
+        `;
+
+    } catch (e) {
+        contenedor.innerHTML = "<p class='msg-error'>Error al cargar historial.</p>";
+    }
+}
+
+function seleccionarId(id) {
+    document.getElementById("inputId").value = id;
+    document.getElementById("inputId").scrollIntoView({ behavior: "smooth" });
+}
+
+/* ─── logs de una solicitud ─── */
+
+async function verLogsSolicitud() {
+    const id = document.getElementById("inputId").value;
+    if (!id) { setMsg("msgConsulta", "Ingresa un ID.", "error"); return; }
+
+    document.getElementById("resConsulta").style.display = "none";
+    setMsg("msgConsulta", "Cargando logs...", "info");
+
+    try {
+        const res = await fetch(API + "/logs/" + id, { headers: authHeader() });
+        if (manejarNoAutorizado(res.status)) return;
+
+        const data = await res.json();
+
+        if (res.ok) {
+            setMsg("msgConsulta", `${data.length} log(s) para solicitud #${id}.`, "success");
+            setRes("resConsulta", data);
+        } else {
+            setMsg("msgConsulta", data.detail || "Sin logs.", "error");
+        }
+    } catch (e) {
+        setMsg("msgConsulta", "Error de conexión: " + e.message, "error");
+    }
+}
+
+/* ─── nodos ─── */
+
+async function cargarNodos() {
+    const contenedor = document.getElementById("tablaНодов");
+    contenedor.innerHTML = "<p class='msg-info'>Cargando...</p>";
+
+    try {
+        const res = await fetch(API + "/nodos", { headers: authHeader() });
+        if (manejarNoAutorizado(res.status)) return;
+
+        const lista = await res.json();
+
+        if (!lista.length) {
+            contenedor.innerHTML = "<p class='msg-info'>No hay nodos registrados.</p>";
+            return;
+        }
+
+        const filas = lista.map(n => `
+            <tr>
+                <td>${n.id_nodo}</td>
+                <td>${n.nombre || "—"}</td>
+                <td>${n.direccion_ip}</td>
+                <td>${badge(n.estado)}</td>
+                <td>${n.capacidad}</td>
+                <td>${fechaBogota(n.ultima_actividad)}</td>
+            </tr>
+        `).join("");
+
+        contenedor.innerHTML = `
+            <table>
+                <thead>
+                    <tr>
+                        <th>ID</th><th>Nombre</th><th>IP</th>
+                        <th>Estado</th><th>Hilos</th><th>Última actividad</th>
+                    </tr>
+                </thead>
+                <tbody>${filas}</tbody>
+            </table>
+        `;
+    } catch (e) {
+        contenedor.innerHTML = "<p class='msg-error'>Error al cargar nodos.</p>";
+    }
+}
+
+/* ─── logs del sistema ─── */
+
+async function cargarLogs(nivel = "") {
+    const contenedor = document.getElementById("tablaLogs");
+    contenedor.innerHTML = "<p class='msg-info'>Cargando...</p>";
+
+    const url = API + "/logs" + (nivel ? "?nivel=" + nivel : "");
+
+    try {
+        const res = await fetch(url, { headers: authHeader() });
+        if (manejarNoAutorizado(res.status)) return;
+
+        const lista = await res.json();
+
+        if (!lista.length) {
+            contenedor.innerHTML = "<p class='msg-info'>No hay logs.</p>";
+            return;
+        }
+
+        const filas = lista.map(l => `
+            <tr>
+                <td>${l.id_log}</td>
+                <td>${l.id_imagen ?? "—"}</td>
+                <td>${l.id_nodo ?? "—"}</td>
+                <td>${badgeNivel(l.nivel)}</td>
+                <td style="max-width:340px;word-break:break-word;">${l.mensaje}</td>
+                <td style="white-space:nowrap;">${fechaBogota(l.fecha)}</td>
+            </tr>
+        `).join("");
+
+        contenedor.innerHTML = `
+            <table>
+                <thead>
+                    <tr>
+                        <th>ID</th><th>Imagen</th><th>Nodo</th>
+                        <th>Nivel</th><th>Mensaje</th><th>Fecha</th>
+                    </tr>
+                </thead>
+                <tbody>${filas}</tbody>
+            </table>
+        `;
+    } catch (e) {
+        contenedor.innerHTML = "<p class='msg-error'>Error al cargar logs.</p>";
+    }
+}
+
+/* ─── imágenes individuales del lote ─── */
+
+async function verImagenes() {
+    const id = document.getElementById("inputId").value;
+    if (!id) { setMsg("msgConsulta", "Ingresa un ID.", "error"); return; }
+
+    const contenedor = document.getElementById("tablaImagenes");
+    contenedor.innerHTML = "";
+    setMsg("msgConsulta", "Cargando imágenes...", "info");
+
+    try {
+        const res = await fetch(API + "/solicitudes/" + id, { headers: authHeader() });
+        if (manejarNoAutorizado(res.status)) return;
+
+        const data = await res.json();
+
+        if (!res.ok) {
+            setMsg("msgConsulta", data.detail || "No encontrada.", "error");
+            return;
+        }
+
+        const imagenes = data.imagenes || [];
+        if (!imagenes.length) {
+            setMsg("msgConsulta", "Sin imágenes en esta solicitud.", "info");
+            return;
+        }
+
+        setMsg("msgConsulta", `${imagenes.length} imagen(es) en solicitud #${id}.`, "success");
+
+        const filas = imagenes.map(img => {
+            const disponible = img.ruta_resultado !== null;
+            const btnDescargar = disponible
+                ? `<button class="btn-success" style="padding:4px 10px;font-size:12px;"
+                       onclick="descargarImagenIndividual(${img.id_imagen})">
+                       Descargar
+                   </button>`
+                : `<span style="color:#aaa;font-size:12px;">No disponible</span>`;
+
+            return `
+                <tr>
+                    <td>${img.id_imagen}</td>
+                    <td>${img.nombre_archivo}</td>
+                    <td>${badge(img.estado)}</td>
+                    <td>${btnDescargar}</td>
+                </tr>`;
+        }).join("");
+
+        contenedor.innerHTML = `
+            <table style="margin-top:12px;">
+                <thead>
+                    <tr><th>ID</th><th>Archivo</th><th>Estado</th><th>Acción</th></tr>
+                </thead>
+                <tbody>${filas}</tbody>
+            </table>`;
+
+    } catch (e) {
+        setMsg("msgConsulta", "Error de conexión: " + e.message, "error");
+    }
+}
+
+async function descargarImagenIndividual(id_imagen) {
+    try {
+        const res = await fetch(API + "/descargar_imagen/" + id_imagen, {
+            headers: authHeader()
+        });
+
+        if (manejarNoAutorizado(res.status)) return;
+
+        if (!res.ok) {
+            const err = await res.json();
+            alert(err.detail || "Imagen no disponible.");
+            return;
+        }
+
+        const blob = await res.blob();
+        const url  = URL.createObjectURL(blob);
+        const a    = document.createElement("a");
+        a.href     = url;
+        a.download = "imagen_" + id_imagen + ".jpg";
+        a.click();
+        URL.revokeObjectURL(url);
+
+    } catch (e) {
+        alert("Error de conexión: " + e.message);
+    }
+}
+
+/* ─── métricas ─── */
+
+async function cargarMetricas() {
+    const contenedor = document.getElementById("panelMetricas");
+    contenedor.innerHTML = "<p class='msg-info'>Cargando...</p>";
+
+    try {
+        const res = await fetch(API + "/metricas", { headers: authHeader() });
+        if (manejarNoAutorizado(res.status)) return;
+
+        const d = await res.json();
+        const s = d.solicitudes  || {};
+        const n = d.nodos        || {};
+        const sis = d.sistema    || {};
+
+        function barra(pct) {
+            const color = pct > 80 ? "#e74c3c" : pct > 50 ? "#e67e22" : "#27ae60";
+            return `
+                <div style="background:#eee;border-radius:6px;height:10px;width:100%;margin-top:4px;">
+                    <div style="background:${color};width:${pct}%;height:10px;border-radius:6px;
+                                transition:width 0.4s;"></div>
+                </div>
+                <span style="font-size:11px;color:#666;">${pct}%</span>`;
+        }
+
+        contenedor.innerHTML = `
+            <div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(180px,1fr));gap:12px;margin-top:14px;">
+
+                <div style="background:#f9f0fb;padding:14px;border-radius:8px;text-align:center;">
+                    <div style="font-size:28px;font-weight:bold;color:#7a3d6e;">${s.total ?? "—"}</div>
+                    <div style="font-size:12px;color:#555;">Total solicitudes</div>
+                </div>
+
+                <div style="background:#d5f5e3;padding:14px;border-radius:8px;text-align:center;">
+                    <div style="font-size:28px;font-weight:bold;color:#1e8449;">${s.completadas ?? "—"}</div>
+                    <div style="font-size:12px;color:#555;">Completadas</div>
+                </div>
+
+                <div style="background:#fdebd0;padding:14px;border-radius:8px;text-align:center;">
+                    <div style="font-size:28px;font-weight:bold;color:#935116;">${s.pendientes ?? "—"}</div>
+                    <div style="font-size:12px;color:#555;">Pendientes</div>
+                </div>
+
+                <div style="background:#d6eaf8;padding:14px;border-radius:8px;text-align:center;">
+                    <div style="font-size:28px;font-weight:bold;color:#1a5276;">${s.en_proceso ?? "—"}</div>
+                    <div style="font-size:12px;color:#555;">Procesando</div>
+                </div>
+
+                <div style="background:#eaf2ff;padding:14px;border-radius:8px;text-align:center;">
+                    <div style="font-size:28px;font-weight:bold;color:#1a3c6e;">${n.activos ?? "—"}</div>
+                    <div style="font-size:12px;color:#555;">Nodos activos</div>
+                </div>
+
+                ${sis.cpu_porcentaje !== undefined ? `
+                <div style="background:#fff;padding:14px;border-radius:8px;border:1px solid #eee;">
+                    <div style="font-size:12px;color:#555;font-weight:bold;">CPU</div>
+                    ${barra(sis.cpu_porcentaje)}
+                </div>
+
+                <div style="background:#fff;padding:14px;border-radius:8px;border:1px solid #eee;">
+                    <div style="font-size:12px;color:#555;font-weight:bold;">
+                        Memoria — ${sis.memoria_usada_mb} / ${sis.memoria_total_mb} MB
+                    </div>
+                    ${barra(sis.memoria_porcentaje)}
+                </div>` : ""}
+
+            </div>`;
+
+    } catch (e) {
+        contenedor.innerHTML = "<p class='msg-error'>Error al cargar métricas.</p>";
+    }
+}
+
+window.onload = init;
+
+</script>
+</body>
+</html>

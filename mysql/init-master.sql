@@ -1,0 +1,3 @@
+CREATE USER IF NOT EXISTS 'replicator'@'%' IDENTIFIED BY 'replicator123';
+GRANT REPLICATION SLAVE ON *.* TO 'replicator'@'%';
+FLUSH PRIVILEGES;

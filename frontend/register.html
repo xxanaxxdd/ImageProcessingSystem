@@ -1,0 +1,150 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+<meta charset="UTF-8">
+<title>Registro</title>
+
+<style>
+
+body {
+    font-family: 'Segoe UI', sans-serif;
+    background: linear-gradient(135deg, #eba7da, #8fbee4);
+    height: 100vh;
+    display: flex;
+    justify-content: center;
+    align-items: center;
+}
+
+.container {
+    background: white;
+    padding: 40px;
+    width: 380px;
+    border-radius: 15px;
+    box-shadow: 0 10px 25px rgba(0,0,0,0.2);
+    text-align: center;
+}
+
+h2 {
+    margin-bottom: 20px;
+}
+
+input {
+    width: 100%;
+    padding: 12px;
+    margin-top: 12px;
+    border-radius: 8px;
+    border: 1px solid #ccc;
+}
+
+button {
+    width: 100%;
+    padding: 12px;
+    margin-top: 18px;
+    background: #eba7da;
+    color: white;
+    border: none;
+    border-radius: 8px;
+    cursor: pointer;
+}
+
+button:hover {
+    background: #eba7da;
+}
+
+.link {
+    margin-top: 15px;
+}
+
+.error {
+    color: red;
+    margin-top: 10px;
+}
+
+</style>
+
+<script src="/ui/js/api.js"></script>
+<script>
+
+if (localStorage.getItem("token")) {
+    window.location.href = "/ui/dashboard.html";
+}
+
+document.getElementById("form-register").addEventListener("submit", async (e) => {
+    e.preventDefault();
+    const errorEl = document.getElementById("error");
+    errorEl.innerText = "";
+
+    const password  = document.getElementById("password").value;
+    const confirmar = document.getElementById("confirmar").value;
+
+    if (password !== confirmar) {
+        errorEl.innerText = "Las contraseñas no coinciden";
+        return;
+    }
+
+    const formData = new FormData();
+    formData.append("username", document.getElementById("username").value);
+    formData.append("password", password);
+
+    try {
+        await request("POST", "/signup", formData);
+        window.location.href = "/ui/login.html";
+    } catch (err) {
+        errorEl.innerText = err.message || "Error de conexión con el servidor";
+    }
+});
+
+</script>
+
+</head>
+
+<body>
+
+<div class="container">
+
+<h2>Crear cuenta</h2>
+
+<form id="form-register">
+
+<input type="text"
+       id="username"
+       placeholder="Usuario"
+       required>
+
+<input type="email"
+       id="email"
+       placeholder="Correo electrónico">
+
+<input type="password"
+       id="password"
+       placeholder="Contraseña"
+       required>
+
+<input type="password"
+       id="confirmar"
+       placeholder="Confirmar contraseña"
+       required>
+
+<button type="submit">
+
+Registrarse
+
+</button>
+
+</form>
+
+<div class="link">
+
+¿Ya tienes cuenta?  
+<a href="login.html">
+Iniciar sesión
+</a>
+
+</div>
+
+<p class="error" id="error"></p>
+
+</div>
+
+</body>
+</html>

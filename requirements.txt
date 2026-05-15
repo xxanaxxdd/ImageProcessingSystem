@@ -1,0 +1,14 @@
+fastapi
+uvicorn
+sqlalchemy
+pymysql
+python-multipart
+pillow
+celery
+redis
+
+python-jose
+passlib[bcrypt]==1.7.4
+bcrypt==3.2.2
+cryptography
+psutil

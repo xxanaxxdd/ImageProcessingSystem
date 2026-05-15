@@ -1,0 +1,153 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+<meta charset="UTF-8">
+<title>Iniciar sesión</title>
+
+<style>
+
+body {
+    font-family: 'Segoe UI', sans-serif;
+    background: linear-gradient(135deg, #eba7da, #8fbee4);
+    height: 100vh;
+    display: flex;
+    justify-content: center;
+    align-items: center;
+}
+
+.container {
+    background: white;
+    padding: 40px;
+    width: 360px;
+    border-radius: 15px;
+    box-shadow: 0 10px 25px rgba(0,0,0,0.2);
+    text-align: center;
+}
+
+h2 {
+    margin-bottom: 20px;
+    color: #333;
+}
+
+input {
+    width: 100%;
+    padding: 12px;
+    margin-top: 12px;
+    border-radius: 8px;
+    border: 1px solid #ccc;
+}
+
+button {
+    width: 100%;
+    padding: 12px;
+    margin-top: 18px;
+    background: #eba7da;
+    color: white;
+    border: none;
+    border-radius: 8px;
+    cursor: pointer;
+    font-size: 15px;
+}
+
+button:hover {
+    background: #eba7da;
+}
+
+.link {
+    margin-top: 15px;
+    font-size: 14px;
+}
+
+a {
+    color: #eba7da;
+    text-decoration: none;
+    font-weight: bold;
+}
+
+.error {
+    color: red;
+    margin-top: 10px;
+}
+
+</style>
+
+</head>
+
+<body>
+
+<div class="container">
+
+<h2>Iniciar sesión</h2>
+
+<form onsubmit="login(event)">
+
+<input type="text"
+       id="username"
+       placeholder="Usuario"
+       required>
+
+<input type="password"
+       id="password"
+       placeholder="Contraseña"
+       required>
+
+<button type="submit">
+Entrar
+</button>
+
+</form>
+
+<div class="link">
+
+¿No tienes cuenta?  
+<a href="register.html">
+Crear cuenta
+</a>
+
+</div>
+
+<p class="error" id="error"></p>
+
+</div>
+
+<script>
+
+async function login(event) {
+
+    event.preventDefault();
+
+    const username = document.getElementById("username").value;
+    const password = document.getElementById("password").value;
+    const errorEl = document.getElementById("error");
+    errorEl.innerText = "";
+
+    const formData = new FormData();
+    formData.append("username", username);
+    formData.append("password", password);
+
+    try {
+
+        const response = await fetch("http://192.168.32.129:8000/login", {
+            method: "POST",
+            body: formData
+        });
+
+        if (response.ok) {
+            const data = await response.json();
+            localStorage.setItem("token", data.access_token);
+            window.location.href = "dashboard.html";
+        } else {
+            const err = await response.json();
+            errorEl.innerText = err.detail || "Credenciales incorrectas";
+        }
+
+    } catch (e) {
+        errorEl.innerText = "Error de conexión con el servidor";
+    }
+
+}
+
+</script>
+
+</body>
+</html>
